@@ -1,0 +1,10 @@
+tests/
+examples/
+scripts/
+__pycache__/
+**/__pycache__/
+.pytest_cache/
+*.md
+docker-compose.yml
+requirements-dev.txt
+pytest.ini

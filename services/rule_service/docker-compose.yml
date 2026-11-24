@@ -1,0 +1,63 @@
+# =====================================================================
+# Rule service (v2.0 Step 4): runs next to the legacy MySQL container.
+#
+# Always run from the project folder (FDE_PB_Sol), for example:
+#   docker compose -f services/rule_service/docker-compose.yml --env-file .env up -d --build --wait
+#
+# - Joins the legacy system's Docker network (fde-legacy_default), so it
+#   reaches MySQL by its container name fde-mysql. Start MySQL first
+#   (Step 1, I2).
+# - Least privilege: only the settings this service needs are passed in.
+#   The MySQL root password and the bi_analyst password never enter this
+#   container.
+# - Published on 127.0.0.1 only (this computer), port RULE_API_PORT (8101).
+# - The rules folder is mounted read-only, so you can edit the YAML file
+#   on your computer and reload it (POST /v1/rules/reload) without a
+#   rebuild.
+# =====================================================================
+name: fde-rule-service
+
+services:
+  rule-service:
+    build:
+      context: .
+    image: fde-rule-service:2.0.0
+    container_name: fde-rule-service
+    restart: unless-stopped
+
+    environment:
+      MYSQL_HOST: fde-mysql
+      MYSQL_PORT: "3306"
+      FDE_VIEWS_DB: ${FDE_VIEWS_DB:-fde_views}
+      FDE_AUDIT_DB: ${FDE_AUDIT_DB:-fde_audit}
+      RULE_SVC_USER: ${RULE_SVC_USER:-rule_svc}
+      RULE_SVC_PASSWORD: ${RULE_SVC_PASSWORD:?Set RULE_SVC_PASSWORD in .env (Step 3, Part B - update_env)}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env (Step 4, Part B - update_env)}
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-30}
+      RULE_API_KEY: ${RULE_API_KEY:?Set RULE_API_KEY in .env (Step 4, Part B - update_env)}
+      API_USER_DISPATCHER_PASSWORD: ${API_USER_DISPATCHER_PASSWORD:?Set API_USER_DISPATCHER_PASSWORD in .env (Step 4, Part B - update_env)}
+      API_USER_SUPERVISOR_PASSWORD: ${API_USER_SUPERVISOR_PASSWORD:?Set API_USER_SUPERVISOR_PASSWORD in .env (Step 4, Part B - update_env)}
+      API_USER_ADMIN_PASSWORD: ${API_USER_ADMIN_PASSWORD:?Set API_USER_ADMIN_PASSWORD in .env (Step 4, Part B - update_env)}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+    ports:
+      - "127.0.0.1:${RULE_API_PORT:-8101}:8101"
+
+    volumes:
+      - ./app/rules:/app/app/rules:ro
+
+    # "healthy" = the service answers GET /health. Used by "up --wait".
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8101/health', timeout=3).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+    networks:
+      - legacy
+
+networks:
+  legacy:
+    name: fde-legacy_default
+    external: true

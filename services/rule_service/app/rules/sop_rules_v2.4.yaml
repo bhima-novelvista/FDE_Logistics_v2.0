@@ -1,0 +1,98 @@
+# =====================================================================
+# sop_rules_v2.4.yaml - the company's SOP rules, as data.
+#
+# The rule service reads this file at start-up (and on
+# POST /v1/rules/reload). It checks the file first and refuses it if
+# anything is wrong (unknown field, unknown comparison, duplicate ID,
+# missing action). The file is never run as code: the engine only
+# compares reading values with the numbers and words written here.
+#
+# How a rule works
+#   when:  all: [...]  -> every condition must be true
+#          any: [...]  -> at least one condition must be true
+#   a condition = { field: <reading field>, op: <comparison>, value: <number or text> }
+#   comparisons: >  >=  <  <=  ==  !=   (text comparisons ignore upper/lower case)
+#   then:  what the dispatcher must do, how serious it is, and where the
+#          SOP says so
+#
+# "rules" are real SOP rules. "gaps" are situations the SOP does not
+# cover: the service reports them for a human to decide and never
+# invents an action for them.
+#
+# Reading fields you can use:
+#   temperature_c, eta_variation_hours, port_congestion_level,
+#   delay_probability, risk_classification, cargo_condition_code,
+#   route_risk_index, latitude, longitude
+#
+# To change a rule: edit this file, keep the same layout, raise
+# sop.version if the SOP itself changed, then call POST /v1/rules/reload
+# (admin) or restart the service.
+# =====================================================================
+
+sop:
+  name: Cold-Chain Incident SOP
+  version: "2.4"
+  effective: "2021-01-01"
+  source: >-
+    Derived from HLD v1.2, section 8.2, which quotes Cold_Chain_Incident_SOP_v2.md
+    (version 2.4, effective January 2021). The original SOP file was not available
+    when this file was written; check it against the SOP when it is.
+  assumptions:
+    - "R2: 'ETA delay greater than 1 hour' is read as ETA_Variation_Hours > 1.0 (positive = hours late)."
+    - "R3: the SOP names the Port of Long Beach / LA; the data has no port name, so the port congestion level is taken as the destination port's level and R3 is applied to all readings."
+    - "Thresholds are strict: exactly 4.0 °C, 0.65 or 7.0 does not trigger a rule (the SOP says 'exceeds' / 'above')."
+
+rules:
+  - id: R1
+    name: Critical temperature breach
+    when:
+      all:
+        - { field: temperature_c, op: ">", value: 4.0 }
+    then:
+      severity: critical
+      action: Contact the driver to restart the auxiliary cooling unit.
+      sop_section: "1. Temperature Control & Spoilage Prevention"
+
+  - id: R2
+    name: Breach and more than 1 hour late - divert to cold storage
+    when:
+      all:
+        - { field: temperature_c, op: ">", value: 4.0 }
+        - { field: eta_variation_hours, op: ">", value: 1.0 }
+    then:
+      severity: critical
+      action: Divert the vehicle to the nearest emergency cold-storage facility.
+      sop_section: "1. Temperature Control & Spoilage Prevention (Mitigation Protocol)"
+
+  - id: R3
+    name: Port congestion - divert to overflow depot
+    when:
+      all:
+        - { field: port_congestion_level, op: ">", value: 7.0 }
+    then:
+      severity: high
+      action: Suspend standard routing and divert to the Inland Empire Overflow Depot (San Bernardino).
+      sop_section: "2. Port Congestion (section number inferred)"
+      note: "Assumes the port congestion level is the destination port's level (see assumptions)."
+
+  - id: R4
+    name: Tier 2 escalation
+    when:
+      all:
+        - { field: risk_classification, op: "==", value: "High Risk" }
+        - { field: delay_probability, op: ">", value: 0.65 }
+    then:
+      severity: high
+      action: Escalate the shipment to the Tier 2 Logistics Manager.
+      sop_section: "3. Risk Classification Triggers"
+
+gaps:
+  - id: G1
+    name: Below 0 °C - no SOP rule
+    when:
+      all:
+        - { field: temperature_c, op: "<", value: 0.0 }
+    then:
+      severity: review
+      action: The SOP has no rule for readings below 0.0 °C. Do not act on the rules alone; refer this reading to the shift supervisor.
+      sop_section: "1. Temperature Control (range 0.0-4.0 °C; no action defined below 0.0 °C)"

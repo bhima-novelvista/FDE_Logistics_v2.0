@@ -1,0 +1,36 @@
+FDE_PB_Sol - v1.0 Base Version - snapshot manifest
+Created: 2026-11-24 12:22 UTC
+Archive: FDE_PB_Sol_v1.0_Base.zip  (8,498,861 bytes)
+Archive SHA-256: a6e1f4606bbc677685a3ee1dcbf2a51fe725e9caddefde1caae57befa726df2a
+Not included: .env (private passwords), venv_legacy (Python environment), caches, .DS_Store, releases/
+
+29 files (path | bytes | SHA-256):
+.env.example | 672 | 8cfbd5f3e00b96294294e3e2bf133c397f3d3852e34261834152ae6628a1bdfe
+.gitattributes | 544 | 069e888a4b680e3247b57dfab845f89c3560fb779361d2a96b1301a037203cc7
+.gitignore | 302 | 38665bbfc0437ee0d8bcaee0a477f52495123e716ca48a51e35d98a8d7b2c459
+CHANGELOG.md | 4447 | 0bf885516b1f63b55a2dd2b7d527c30bd5924ea7824c32ffbad569d9b2bbb2ca
+README.md | 4608 | f358ac8f27680bf66cdb64b61e2a46288f476361dbff231262aaee6a826b3c89
+VERSION | 31 | 56327e223551d9f7162d66a176ed91c835f862fc9bd45e27bc947d855ee14349
+data/policy/README.md | 184 | 7fb64d5e6aa07522a2b72542589da883832e0b415ba3f011cce934f3026995af
+data/raw/dynamic_supply_chain_logistics_dataset.csv | 15459276 | 9264db262d347ab3b7078fb612adc91e3043c6b33480b3b15dfba66303e75400
+data/source/data.txt | 82 | da427a4b34f49a89b02b0b29cb629cb35c682fedc310a1fe02fedce73513be6f
+docs/01_Legacy_System_Setup_Guide.md | 51083 | c9d77631f4ea8db3066de020e058c031408778b026147fef804be06c63d08f00
+docs/02_Legacy_BI_Dashboard_Guide.md | 21915 | b6afaa4af5b0b04e0a27f0af8746599a564c3bea9e64e627c42cd602902e0573
+docs/archive/01_Legacy_System_Setup_Guide_Windows.md | 43994 | de9e448e1b6bdf58b3fdc05e43b129353d651489fc2089359b99955076f97953
+docs/archive/01_Legacy_System_Setup_Guide_macOS.md | 36441 | b45220e725dbac63cd4bc7c2969b6fd6bb4e6a489df9f62c5fc0d7207a544a6a
+docs/images/step2/s2_01_login.png | 43427 | 1ac43b3e2bfd85149e35926afd924b1035e45c7761d8944829924364ba43bdc2
+docs/images/step2/s2_02_overview.png | 488922 | 36649fa7742cfd7b2e54e870e259eacda6ef2b5d9026bc9d7e7c091475ad9ce2
+docs/images/step2/s2_03_risk_report.png | 525546 | d4c0c8fef7923514ec7185230b12f99b8db12cd7794a41a4e2d81dd1ff8c206f
+docs/images/step2/s2_04_sql_console.png | 222888 | 6401de675bc35c16d608e5a53406ac07644f5e20e6d408806dcff0945255caaf
+docs/prompts/02_Copilot_Prompt_Legacy_BI_Dashboard.md | 9366 | 2dbe602d41309a4c2296ff8629aff3e55fe186627eb3f2bd867bef4981a872dd
+legacy_system/create_env.ps1 | 4252 | 96b35da4b2edf71935b206b7f9641b6fe220d0251bf1defd811c72bce336d08d
+legacy_system/create_env.sh | 2782 | fbb41dd8c91e49d6a4a4375fce9d9139f76e062586a2c497e2618a2a20d1c2c2
+legacy_system/docker-compose.yml | 2352 | c17031225183d52b6faca8fa1b2c5715d86f44c2660b59995c2368236f3a8cd0
+legacy_system/bi_dashboard/app.py | 20871 | 3b338ce50df26ed950bec2d233f16d1f355178123750c7557cfb05570b454114
+legacy_system/bi_dashboard/requirements.txt | 291 | c83b0c7a9d56a0a4d331a72a3b6db40b0d581524d2d170acf3a808ee08a2e5f4
+legacy_system/mysql/scripts/01_create_legacy_schema.sql | 3926 | 5d25612173bb46cb82ca9f0ed529865983610f8c19f7a1652c93795471406b4a
+legacy_system/mysql/scripts/02_create_bi_analyst.sh | 1303 | c944b2ea304d4f938d26d8c2395b3b65947da5ccd7b688909e89e1b1f04c766b
+legacy_system/mysql/scripts/03_load_legacy_data.sql | 3234 | 22750ecb0ccd6a10c1b9df903070aab59ef06071e39af811c2fab5d362f72efb
+legacy_system/mysql/scripts/04_verify_load.sql | 4789 | a3d3bc1a3258789e1f5617692c3bf1982f152f42e3f976abf93d2a7484878306
+legacy_system/mysql/scripts/run_sql.sh | 1274 | 155456e2316d2c01445ef5de8f4b78ad6bf28299ca5ed165f18bfab8fc13c659
+src_maf/README.md | 248 | e3e2ceb2f4fb89d4e7a0d66436956a0246ba4502f96d515760addd8e719fe14d

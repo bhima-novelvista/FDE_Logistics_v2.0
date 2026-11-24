@@ -1,0 +1,22 @@
+sequenceDiagram
+    autonumber
+    actor D as Dispatcher
+    participant B as BI dashboard
+    participant DB as Legacy database
+    participant S as SOP files
+    participant W as Weather website
+    actor T as Tier 2 manager
+    Note over D: Driver calls: cargo drifting above 0-4 °C
+    D->>B: Log in with ID + password
+    D->>B: Pick date range, risk class, lat/lon box
+    B->>DB: Fixed report query (cryptic columns)
+    DB-->>B: Rows: TS_UTC, V_LAT, IOT_TEMP_VAL_C ...
+    B-->>D: Map, table, averages
+    Note over D,B: No place names, no truck ID, averages hide breaches
+    D->>S: Search folders for the right rule
+    S-->>D: A rule (maybe an old copy)
+    D->>W: Check weather for the coordinates
+    W-->>D: Conditions
+    Note over D: Combine everything by hand and decide
+    D->>T: Phone call if escalation is needed
+    Note over D,T: No record of how the decision was made

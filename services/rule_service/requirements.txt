@@ -1,0 +1,15 @@
+# v2.0 Step 4: rule service (FastAPI). Python 3.12 (3.11 or newer works).
+# Exact versions, checked on PyPI on 24 Nov 2026. Used by the Docker image
+# and by the local environment venv_services (see docs/04_Rule_Service_API_Guide.md).
+fastapi==0.165.0
+uvicorn==0.54.0
+pydantic==2.14.4
+pydantic-settings==2.16.3
+SQLAlchemy[asyncio]==2.1.9
+greenlet==3.5.6
+aiomysql==0.3.2
+PyMySQL==1.2.4
+cryptography==50.0.2
+PyJWT==2.15.1
+python-multipart==0.0.34
+PyYAML==6.0.4

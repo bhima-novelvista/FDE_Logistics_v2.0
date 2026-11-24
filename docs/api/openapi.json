@@ -1,0 +1,2121 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Harborline Cold-Chain Rule Service",
+    "summary": "SOP rules as an API, over the legacy fleet data (FDE_PB_Sol v2.0).",
+    "description": "\nApplies Harborline's **Cold-Chain Incident SOP (v2.4)** to the legacy fleet readings and returns a\ndecision a dispatcher can act on: which rules apply, why, what to do, and where the SOP says so.\n\n* Reads the legacy data **only** through the read-only view `fde_views.vw_fleet_readings`\n  (database login `rule_svc`; it cannot change data).\n* Writes **every decision** to the append-only audit table `fde_audit.RuleDecisionLog`.\n* The rules live in a YAML file (`app/rules/sop_rules_v2.4.yaml`); `GET /v1/rules` shows them.\n\n### How to log in here\nClick **Authorize** (top right):\n* **Login (JWT)**: user name `dispatcher`, `supervisor` or `admin` and the password from your `.env`\n  (`API_USER_..._PASSWORD`). Leave *client_id* and *client_secret* empty.\n* **API key**: for machine clients; the `RULE_API_KEY` value from `.env`.\n\n| Role | Can do |\n|---|---|\n| dispatcher | read readings, check readings, get decisions |\n| supervisor | the above, plus bulk scans |\n| admin | the above, plus reloading the rules file |\n| service (API key) | like a supervisor |\n\nEvery response carries an `X-Request-ID` header; errors use one format (RFC 9457 problem details).\nHarborline and its people are fictional; the readings are a real public dataset.\n",
+    "version": "2.0.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Is the service running?",
+        "description": "Liveness check. Needs no login and does not touch the database. Docker uses it to mark the container healthy.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Can the service do its work?",
+        "description": "Readiness check: the rules are loaded and the legacy database answers through the view. Returns 503 if the database cannot be reached.",
+        "operationId": "ready_ready_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ready"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                },
+                "example": {
+                  "type": "https://fde-pb-sol.local/problems/database-unavailable",
+                  "title": "Database unavailable",
+                  "status": 503,
+                  "detail": "The legacy database could not be reached or did not answer in time. Try again shortly.",
+                  "instance": "/ready",
+                  "request_id": "3f0c9d4e8b6a4c1e9a7d2b5c6e8f0a1b"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/token": {
+      "post": {
+        "tags": [
+          "Login"
+        ],
+        "summary": "Log in and get a token (JWT)",
+        "description": "Send the user name and password as a form (`application/x-www-form-urlencoded`), the standard OAuth2 'password' way. Users: `dispatcher`, `supervisor`, `admin`; their passwords are in your `.env`. The token is valid for `JWT_EXPIRE_MINUTES` (30 by default). In Swagger, use the **Authorize** button instead of calling this yourself.",
+        "operationId": "login_v1_auth_token_post",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_login_v1_auth_token_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Wrong user name or password",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                },
+                "example": {
+                  "type": "https://fde-pb-sol.local/problems/unauthorized",
+                  "title": "Not logged in",
+                  "status": 401,
+                  "detail": "Wrong user name or password.",
+                  "instance": "/v1/auth/token",
+                  "request_id": "3f0c9d4e8b6a4c1e9a7d2b5c6e8f0a1b"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "User name or password missing",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                },
+                "example": {
+                  "type": "https://fde-pb-sol.local/problems/validation-error",
+                  "title": "Invalid input",
+                  "status": 422,
+                  "detail": "1 input value(s) are missing or invalid. See 'errors'.",
+                  "instance": "/v1/auth/token",
+                  "request_id": "3f0c9d4e8b6a4c1e9a7d2b5c6e8f0a1b",
+                  "errors": [
+                    {
+                      "where": "body.password",
+                      "problem": "Field required"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/me": {
+      "get": {
+        "tags": [
+          "Login"
+        ],
+        "summary": "Who am I logged in as?",
+        "operationId": "me_v1_auth_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                },
+                "example": {
+                  "type": "https://fde-pb-sol.local/problems/unauthorized",
+                  "title": "Not logged in",
+                  "status": 401,
+                  "detail": "Log in first: send 'Authorization: Bearer <token>' (get one at POST /v1/auth/token) or 'X-API-Key: <key>'.",
+                  "instance": "/v1/auth/me",
+                  "request_id": "3f0c9d4e8b6a4c1e9a7d2b5c6e8f0a1b"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "Login (JWT)": []
+          },
+          {
+            "API key": []
+          }
+        ]
+      }
+    },
+    "/v1/rules": {
+      "get": {
+        "tags": [
+          "Rules"
+        ],
+        "summary": "List the active SOP rules",
+        "description": "The rules and gaps the engine uses right now, exactly as read from the rules file.",
+        "operationId": "list_rules_v1_rules_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RulesResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                },
+                "example": {
+                  "type": "https://fde-pb-sol.local/problems/unauthorized",
+                  "title": "Not logged in",
+                  "status": 401,
+                  "detail": "Log in first: send 'Authorization: Bearer <token>' (get one at POST /v1/auth/token) or 'X-API-Key: <key>'.",
+                  "instance": "/v1/rules",
+                  "request_id": "3f0c9d4e8b6a4c1e9a7d2b5c6e8f0a1b"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "Login (JWT)": []
+          },
+          {
+            "API key": []
+          }
+        ]
+      }
+    },
+    "/v1/rules/reload": {
+      "post": {
+        "tags": [
+          "Rules"
+        ],
+        "summary": "Reload the rules file (admin)",
+        "description": "Reads the rules file again, for example after you changed a threshold. The new file is checked first: if anything is wrong it is refused with 422 and a list of problems, and the old rules stay active. Every reload attempt is written to the audit trail.",
+        "operationId": "reload_rules_v1_rules_reload_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReloadResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                },
+                "example": {
+                  "type": "https://fde-pb-sol.local/problems/unauthorized",
+                  "title": "Not logged in",
+                  "status": 401,
+                  "detail": "Log in first: send 'Authorization: Bearer <token>' (get one at POST /v1/auth/token) or 'X-API-Key: <key>'.",
+                  "instance": "/v1/rules/reload",
+                  "request_id": "3f0c9d4e8b6a4c1e9a7d2b5c6e8f0a1b"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only admin may reload",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                },
+                "example": {
+                  "type": "https://fde-pb-sol.local/problems/forbidden",
+                  "title": "Not allowed",
+                  "status": 403,
+                  "detail": "Your role 'supervisor' may not do this. Allowed roles: admin.",
+                  "instance": "/v1/rules/reload",
+                  "request_id": "3f0c9d4e8b6a4c1e9a7d2b5c6e8f0a1b"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The rules file has mistakes; the old rules stay active",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                },
+                "example": {
+                  "type": "https://fde-pb-sol.local/problems/rules-file-invalid",
+                  "title": "Rules file refused",
+                  "status": 422,
+                  "detail": "The rules file has 1 problem(s). The old rules (version 2.4) stay active.",
+                  "instance": "/v1/rules/reload",
+                  "request_id": "3f0c9d4e8b6a4c1e9a7d2b5c6e8f0a1b"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "Login (JWT)": []
+          },
+          {
+            "API key": []
+          }
+        ]
+      }
+    },
+    "/v1/readings/latest": {
+      "get": {
+        "tags": [
+          "Readings and decisions"
+        ],
+        "summary": "The newest readings",
+        "description": "The newest readings first. Optionally only inside a latitude/longitude box: give all four of `lat_min`, `lat_max`, `lon_min`, `lon_max` (for example the Los Angeles area 33.3, 34.3, -118.6, -117.6).",
+        "operationId": "latest_v1_readings_latest_get",
+        "security": [
+          {
+            "Login (JWT)": []
+          },
+          {
+            "API key": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "description": "How many readings (1 to 50)",
+              "default": 5,
+              "title": "Limit"
+            },
+            "description": "How many readings (1 to 50)"
+          },
+          {
+            "name": "lat_min",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "maximum": 90,
+                  "minimum": -90
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lat Min"
+            }
+          },
+          {
+            "name": "lat_max",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "maximum": 90,
+                  "minimum": -90
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lat Max"
+            }
+          },
+          {
+            "name": "lon_min",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "maximum": 180,
+                  "minimum": -180
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lon Min"
+            }
+          },
+          {
+            "name": "lon_max",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "maximum": 180,
+                  "minimum": -180
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lon Max"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadingList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                },
+                "example": {
+                  "type": "https://fde-pb-sol.local/problems/unauthorized",
+                  "title": "Not logged in",
+                  "status": 401,
+                  "detail": "Log in first: send 'Authorization: Bearer <token>' (get one at POST /v1/auth/token) or 'X-API-Key: <key>'.",
+                  "instance": "/v1/readings/latest",
+                  "request_id": "3f0c9d4e8b6a4c1e9a7d2b5c6e8f0a1b"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                },
+                "example": {
+                  "type": "https://fde-pb-sol.local/problems/validation-error",
+                  "title": "Invalid input",
+                  "status": 422,
+                  "detail": "Give all four of lat_min, lat_max, lon_min and lon_max, or none of them.",
+                  "instance": "/v1/readings/latest",
+                  "request_id": "3f0c9d4e8b6a4c1e9a7d2b5c6e8f0a1b"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                },
+                "example": {
+                  "type": "https://fde-pb-sol.local/problems/database-unavailable",
+                  "title": "Database unavailable",
+                  "status": 503,
+                  "detail": "The legacy database could not be reached or did not answer in time. Try again shortly.",
+                  "instance": "/v1/readings/latest",
+                  "request_id": "3f0c9d4e8b6a4c1e9a7d2b5c6e8f0a1b"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/readings/{reading_id}": {
+      "get": {
+        "tags": [
+          "Readings and decisions"
+        ],
+        "summary": "One reading",
+        "operationId": "get_reading_v1_readings__reading_id__get",
+        "security": [
+          {
+            "Login (JWT)": []
+          },
+          {
+            "API key": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "reading_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000000000000,
+              "minimum": 1,
+              "description": "Reading ID, for example 32065",
+              "title": "Reading Id"
+            },
+            "description": "Reading ID, for example 32065"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reading"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                },
+                "example": {
+                  "type": "https://fde-pb-sol.local/problems/unauthorized",
+                  "title": "Not logged in",
+                  "status": 401,
+                  "detail": "Log in first: send 'Authorization: Bearer <token>' (get one at POST /v1/auth/token) or 'X-API-Key: <key>'.",
+                  "instance": "/v1/readings/99999999",
+                  "request_id": "3f0c9d4e8b6a4c1e9a7d2b5c6e8f0a1b"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No reading with this ID",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                },
+                "example": {
+                  "type": "https://fde-pb-sol.local/problems/not-found",
+                  "title": "Not found",
+                  "status": 404,
+                  "detail": "There is no reading with ID 99999999.",
+                  "instance": "/v1/readings/99999999",
+                  "request_id": "3f0c9d4e8b6a4c1e9a7d2b5c6e8f0a1b"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid reading ID",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                },
+                "example": {
+                  "type": "https://fde-pb-sol.local/problems/validation-error",
+                  "title": "Invalid input",
+                  "status": 422,
+                  "detail": "1 input value(s) are missing or invalid. See 'errors'.",
+                  "instance": "/v1/readings/99999999",
+                  "request_id": "3f0c9d4e8b6a4c1e9a7d2b5c6e8f0a1b",
+                  "errors": [
+                    {
+                      "where": "path.reading_id",
+                      "problem": "Input should be greater than or equal to 1"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                },
+                "example": {
+                  "type": "https://fde-pb-sol.local/problems/database-unavailable",
+                  "title": "Database unavailable",
+                  "status": 503,
+                  "detail": "The legacy database could not be reached or did not answer in time. Try again shortly.",
+                  "instance": "/v1/readings/99999999",
+                  "request_id": "3f0c9d4e8b6a4c1e9a7d2b5c6e8f0a1b"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/readings/{reading_id}/decision": {
+      "get": {
+        "tags": [
+          "Readings and decisions"
+        ],
+        "summary": "What does the SOP say about this reading?",
+        "description": "Reads the reading from the legacy data (through the read-only view), applies the SOP rules and returns the decision: which rules apply, why (the evidence), what to do and where the SOP says so. The decision is written to the audit trail with your name. Roles: dispatcher, supervisor, admin, service.",
+        "operationId": "decision_for_reading_v1_readings__reading_id__decision_get",
+        "security": [
+          {
+            "Login (JWT)": []
+          },
+          {
+            "API key": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "reading_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000000000000,
+              "minimum": 1,
+              "description": "Reading ID, for example 32065",
+              "title": "Reading Id"
+            },
+            "description": "Reading ID, for example 32065"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecisionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                },
+                "example": {
+                  "type": "https://fde-pb-sol.local/problems/unauthorized",
+                  "title": "Not logged in",
+                  "status": 401,
+                  "detail": "Log in first: send 'Authorization: Bearer <token>' (get one at POST /v1/auth/token) or 'X-API-Key: <key>'.",
+                  "instance": "/v1/readings/99999999/decision",
+                  "request_id": "3f0c9d4e8b6a4c1e9a7d2b5c6e8f0a1b"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No reading with this ID",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                },
+                "example": {
+                  "type": "https://fde-pb-sol.local/problems/not-found",
+                  "title": "Not found",
+                  "status": 404,
+                  "detail": "There is no reading with ID 99999999.",
+                  "instance": "/v1/readings/99999999/decision",
+                  "request_id": "3f0c9d4e8b6a4c1e9a7d2b5c6e8f0a1b"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid reading ID",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                },
+                "example": {
+                  "type": "https://fde-pb-sol.local/problems/validation-error",
+                  "title": "Invalid input",
+                  "status": 422,
+                  "detail": "1 input value(s) are missing or invalid. See 'errors'.",
+                  "instance": "/v1/readings/99999999/decision",
+                  "request_id": "3f0c9d4e8b6a4c1e9a7d2b5c6e8f0a1b",
+                  "errors": [
+                    {
+                      "where": "path.reading_id",
+                      "problem": "Input should be a valid integer"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                },
+                "example": {
+                  "type": "https://fde-pb-sol.local/problems/database-unavailable",
+                  "title": "Database unavailable",
+                  "status": 503,
+                  "detail": "The legacy database could not be reached or did not answer in time. Try again shortly.",
+                  "instance": "/v1/readings/99999999/decision",
+                  "request_id": "3f0c9d4e8b6a4c1e9a7d2b5c6e8f0a1b"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/evaluate": {
+      "post": {
+        "tags": [
+          "Readings and decisions"
+        ],
+        "summary": "Check a reading you send",
+        "description": "Applies the SOP rules to the reading in the request body, for example a reading the driver reads out on the phone, or a 'what if' test. The body is checked first: values out of range, an unknown risk class or extra fields are refused with 422. The decision is written to the audit trail.",
+        "operationId": "evaluate_v1_evaluate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReadingIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecisionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                },
+                "example": {
+                  "type": "https://fde-pb-sol.local/problems/unauthorized",
+                  "title": "Not logged in",
+                  "status": 401,
+                  "detail": "Log in first: send 'Authorization: Bearer <token>' (get one at POST /v1/auth/token) or 'X-API-Key: <key>'.",
+                  "instance": "/v1/evaluate",
+                  "request_id": "3f0c9d4e8b6a4c1e9a7d2b5c6e8f0a1b"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid reading",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                },
+                "example": {
+                  "type": "https://fde-pb-sol.local/problems/validation-error",
+                  "title": "Invalid input",
+                  "status": 422,
+                  "detail": "1 input value(s) are missing or invalid. See 'errors'.",
+                  "instance": "/v1/evaluate",
+                  "request_id": "3f0c9d4e8b6a4c1e9a7d2b5c6e8f0a1b",
+                  "errors": [
+                    {
+                      "where": "body.delay_probability",
+                      "problem": "Input should be less than or equal to 1"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "Login (JWT)": []
+          },
+          {
+            "API key": []
+          }
+        ]
+      }
+    },
+    "/v1/scan": {
+      "post": {
+        "tags": [
+          "Bulk checks"
+        ],
+        "summary": "Check many readings at once (supervisor)",
+        "description": "Counts, for every rule, how many readings in the window or area it applies to. The counting runs inside MySQL: the engine turns each YAML rule into a parameterised SQL condition, so only the totals travel over the network. The newest readings that need action are then fetched and evaluated in full by the same engine (`examples`). With an empty body all 32,065 readings are checked. Roles: supervisor, admin, service.",
+        "operationId": "scan_v1_scan_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScanRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                },
+                "example": {
+                  "type": "https://fde-pb-sol.local/problems/unauthorized",
+                  "title": "Not logged in",
+                  "status": 401,
+                  "detail": "Log in first: send 'Authorization: Bearer <token>' (get one at POST /v1/auth/token) or 'X-API-Key: <key>'.",
+                  "instance": "/v1/scan",
+                  "request_id": "3f0c9d4e8b6a4c1e9a7d2b5c6e8f0a1b"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed (dispatchers cannot scan)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                },
+                "example": {
+                  "type": "https://fde-pb-sol.local/problems/forbidden",
+                  "title": "Not allowed",
+                  "status": 403,
+                  "detail": "Your role 'dispatcher' may not do this. Allowed roles: supervisor, admin, service.",
+                  "instance": "/v1/scan",
+                  "request_id": "3f0c9d4e8b6a4c1e9a7d2b5c6e8f0a1b"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid window or area",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                },
+                "example": {
+                  "type": "https://fde-pb-sol.local/problems/validation-error",
+                  "title": "Invalid input",
+                  "status": 422,
+                  "detail": "1 input value(s) are missing or invalid. See 'errors'.",
+                  "instance": "/v1/scan",
+                  "request_id": "3f0c9d4e8b6a4c1e9a7d2b5c6e8f0a1b",
+                  "errors": [
+                    {
+                      "where": "body",
+                      "problem": "Value error, from_time must be before to_time"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                },
+                "example": {
+                  "type": "https://fde-pb-sol.local/problems/database-unavailable",
+                  "title": "Database unavailable",
+                  "status": 503,
+                  "detail": "The legacy database could not be reached or did not answer in time. Try again shortly.",
+                  "instance": "/v1/scan",
+                  "request_id": "3f0c9d4e8b6a4c1e9a7d2b5c6e8f0a1b"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "Login (JWT)": []
+          },
+          {
+            "API key": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Area": {
+        "properties": {
+          "lat_min": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Lat Min"
+          },
+          "lat_max": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Lat Max"
+          },
+          "lon_min": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Lon Min"
+          },
+          "lon_max": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Lon Max"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "lat_min",
+          "lat_max",
+          "lon_min",
+          "lon_max"
+        ],
+        "title": "Area"
+      },
+      "Body_login_v1_auth_token_post": {
+        "properties": {
+          "grant_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^password$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grant Type"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "password": {
+            "type": "string",
+            "format": "password",
+            "title": "Password"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope",
+            "default": ""
+          },
+          "client_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id"
+          },
+          "client_secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "format": "password",
+            "title": "Client Secret"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "Body_login_v1_auth_token_post"
+      },
+      "ConditionOut": {
+        "properties": {
+          "field": {
+            "type": "string",
+            "title": "Field"
+          },
+          "op": {
+            "type": "string",
+            "title": "Op"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "field",
+          "op",
+          "value"
+        ],
+        "title": "ConditionOut"
+      },
+      "Decision": {
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "ACTION_REQUIRED",
+              "REVIEW",
+              "NO_ACTION"
+            ],
+            "title": "Outcome",
+            "description": "ACTION_REQUIRED = at least one SOP rule applies; REVIEW = only an SOP gap applies; NO_ACTION = nothing applies"
+          },
+          "highest_severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "review",
+              "none"
+            ],
+            "title": "Highest Severity"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "fired": {
+            "items": {
+              "$ref": "#/components/schemas/FiredRule"
+            },
+            "type": "array",
+            "title": "Fired"
+          },
+          "rules_version": {
+            "type": "string",
+            "title": "Rules Version",
+            "examples": [
+              "2.4"
+            ]
+          },
+          "sop_name": {
+            "type": "string",
+            "title": "Sop Name",
+            "examples": [
+              "Cold-Chain Incident SOP"
+            ]
+          },
+          "evaluated_at_utc": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Evaluated At Utc"
+          }
+        },
+        "type": "object",
+        "required": [
+          "outcome",
+          "highest_severity",
+          "summary",
+          "fired",
+          "rules_version",
+          "sop_name",
+          "evaluated_at_utc"
+        ],
+        "title": "Decision",
+        "description": "The rule engine's answer for one reading."
+      },
+      "DecisionResponse": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "Quote this to find the log line and audit row"
+          },
+          "reading": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Reading"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The reading from the database (decision endpoint only)"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/Decision"
+          },
+          "audit_logged": {
+            "type": "boolean",
+            "title": "Audit Logged",
+            "description": "True when the decision was written to the audit table"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "decision",
+          "audit_logged"
+        ],
+        "title": "DecisionResponse",
+        "description": "The rule engine's decision, with the reading it is about."
+      },
+      "FiredRule": {
+        "properties": {
+          "rule_id": {
+            "type": "string",
+            "title": "Rule Id",
+            "examples": [
+              "R1"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "rule",
+              "gap"
+            ],
+            "title": "Kind",
+            "description": "'rule' = SOP rule; 'gap' = the SOP has no rule for this"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "examples": [
+              "Critical temperature breach"
+            ]
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "review"
+            ],
+            "title": "Severity"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action",
+            "examples": [
+              "Contact the driver to restart the auxiliary cooling unit."
+            ]
+          },
+          "sop_section": {
+            "type": "string",
+            "title": "Sop Section",
+            "examples": [
+              "1. Temperature Control & Spoilage Prevention"
+            ]
+          },
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Evidence",
+            "description": "The values that made the rule fire",
+            "examples": [
+              [
+                "temperature_c = 18.8 > 4.0"
+              ]
+            ]
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rule_id",
+          "kind",
+          "name",
+          "severity",
+          "action",
+          "sop_section",
+          "evidence"
+        ],
+        "title": "FiredRule",
+        "description": "One rule (or gap) that applies to the reading."
+      },
+      "Health": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "title": "Status",
+            "default": "ok"
+          },
+          "service": {
+            "type": "string",
+            "title": "Service",
+            "default": "rule-service"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "title": "Health"
+      },
+      "Me": {
+        "properties": {
+          "caller": {
+            "type": "string",
+            "title": "Caller",
+            "examples": [
+              "dispatcher"
+            ]
+          },
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "examples": [
+              "dispatcher"
+            ]
+          },
+          "auth_method": {
+            "type": "string",
+            "enum": [
+              "jwt",
+              "api_key"
+            ],
+            "title": "Auth Method"
+          },
+          "token_expires_at_utc": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Expires At Utc"
+          }
+        },
+        "type": "object",
+        "required": [
+          "caller",
+          "role",
+          "auth_method"
+        ],
+        "title": "Me"
+      },
+      "Reading": {
+        "properties": {
+          "reading_id": {
+            "type": "integer",
+            "title": "Reading Id",
+            "description": "Row number in the legacy table (not a truck or shipment ID)",
+            "examples": [
+              32065
+            ]
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Timestamp",
+            "description": "Reading time (UTC)",
+            "examples": [
+              "2024-08-29T00:00:00"
+            ]
+          },
+          "latitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Longitude"
+          },
+          "temperature_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature C"
+          },
+          "eta_variation_hours": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eta Variation Hours"
+          },
+          "port_congestion_level": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Port Congestion Level"
+          },
+          "delay_probability": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delay Probability"
+          },
+          "risk_classification": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Classification"
+          },
+          "cargo_condition_code": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cargo Condition Code"
+          },
+          "route_risk_index": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route Risk Index"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reading_id",
+          "timestamp",
+          "latitude",
+          "longitude",
+          "temperature_c",
+          "eta_variation_hours",
+          "port_congestion_level",
+          "delay_probability",
+          "risk_classification",
+          "cargo_condition_code",
+          "route_risk_index"
+        ],
+        "title": "Reading",
+        "description": "One reading from the legacy data, with readable names."
+      },
+      "ReadingIn": {
+        "properties": {
+          "temperature_c": {
+            "type": "number",
+            "maximum": 80.0,
+            "minimum": -50.0,
+            "title": "Temperature C",
+            "description": "Cargo temperature in °C"
+          },
+          "eta_variation_hours": {
+            "type": "number",
+            "maximum": 240.0,
+            "minimum": -48.0,
+            "title": "Eta Variation Hours",
+            "description": "Hours late (+) or early (-)"
+          },
+          "port_congestion_level": {
+            "type": "number",
+            "maximum": 10.0,
+            "minimum": 0.0,
+            "title": "Port Congestion Level",
+            "description": "Port congestion, 0 to 10"
+          },
+          "delay_probability": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Delay Probability",
+            "description": "Probability of delay, 0 to 1"
+          },
+          "risk_classification": {
+            "type": "string",
+            "enum": [
+              "High Risk",
+              "Moderate Risk",
+              "Low Risk"
+            ],
+            "title": "Risk Classification"
+          },
+          "cargo_condition_code": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cargo Condition Code"
+          },
+          "route_risk_index": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 10.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route Risk Index"
+          },
+          "latitude": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 90.0,
+                "minimum": -90.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 180.0,
+                "minimum": -180.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Longitude"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "temperature_c",
+          "eta_variation_hours",
+          "port_congestion_level",
+          "delay_probability",
+          "risk_classification"
+        ],
+        "title": "ReadingIn",
+        "description": "A reading to check. Only the five fields the SOP rules use are required.",
+        "examples": [
+          {
+            "delay_probability": 0.999,
+            "eta_variation_hours": 4.07,
+            "port_congestion_level": 7.69,
+            "risk_classification": "High Risk",
+            "temperature_c": 18.8
+          },
+          {
+            "delay_probability": 0.29,
+            "eta_variation_hours": -2.0,
+            "port_congestion_level": 7.11,
+            "risk_classification": "High Risk",
+            "temperature_c": -9.98
+          }
+        ]
+      },
+      "ReadingList": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "readings": {
+            "items": {
+              "$ref": "#/components/schemas/Reading"
+            },
+            "type": "array",
+            "title": "Readings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count",
+          "readings"
+        ],
+        "title": "ReadingList"
+      },
+      "Ready": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ready",
+            "title": "Status",
+            "default": "ready"
+          },
+          "database": {
+            "type": "string",
+            "const": "ok",
+            "title": "Database",
+            "default": "ok"
+          },
+          "rules_version": {
+            "type": "string",
+            "title": "Rules Version"
+          },
+          "readings_in_view": {
+            "type": "integer",
+            "title": "Readings In View"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rules_version",
+          "readings_in_view"
+        ],
+        "title": "Ready"
+      },
+      "ReloadResponse": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "previous_version": {
+            "type": "string",
+            "title": "Previous Version"
+          },
+          "rules_version": {
+            "type": "string",
+            "title": "Rules Version"
+          },
+          "rule_count": {
+            "type": "integer",
+            "title": "Rule Count"
+          },
+          "gap_count": {
+            "type": "integer",
+            "title": "Gap Count"
+          },
+          "audit_logged": {
+            "type": "boolean",
+            "title": "Audit Logged"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "message",
+          "previous_version",
+          "rules_version",
+          "rule_count",
+          "gap_count",
+          "audit_logged"
+        ],
+        "title": "ReloadResponse"
+      },
+      "RuleOut": {
+        "properties": {
+          "rule_id": {
+            "type": "string",
+            "title": "Rule Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "rule",
+              "gap"
+            ],
+            "title": "Kind"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "match": {
+            "type": "string",
+            "enum": [
+              "all",
+              "any"
+            ],
+            "title": "Match"
+          },
+          "conditions": {
+            "items": {
+              "$ref": "#/components/schemas/ConditionOut"
+            },
+            "type": "array",
+            "title": "Conditions"
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action"
+          },
+          "sop_section": {
+            "type": "string",
+            "title": "Sop Section"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rule_id",
+          "kind",
+          "name",
+          "match",
+          "conditions",
+          "severity",
+          "action",
+          "sop_section"
+        ],
+        "title": "RuleOut"
+      },
+      "RulesResponse": {
+        "properties": {
+          "sop_name": {
+            "type": "string",
+            "title": "Sop Name"
+          },
+          "rules_version": {
+            "type": "string",
+            "title": "Rules Version"
+          },
+          "effective": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "assumptions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Assumptions"
+          },
+          "loaded_at_utc": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Loaded At Utc"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/RuleOut"
+            },
+            "type": "array",
+            "title": "Rules"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sop_name",
+          "rules_version",
+          "effective",
+          "source",
+          "assumptions",
+          "loaded_at_utc",
+          "rules"
+        ],
+        "title": "RulesResponse"
+      },
+      "ScanExample": {
+        "properties": {
+          "reading": {
+            "$ref": "#/components/schemas/Reading"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/Decision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reading",
+          "decision"
+        ],
+        "title": "ScanExample"
+      },
+      "ScanRequest": {
+        "properties": {
+          "from_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Time",
+            "description": "From this time (UTC), inclusive"
+          },
+          "to_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Time",
+            "description": "Up to this time (UTC), inclusive"
+          },
+          "area": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Area"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Latitude/longitude box"
+          },
+          "examples": {
+            "type": "integer",
+            "maximum": 50.0,
+            "minimum": 0.0,
+            "title": "Examples",
+            "description": "How many of the newest readings that need action to return in full",
+            "default": 5
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ScanRequest",
+        "description": "Which readings to check. Leave everything out to check all readings.",
+        "examples": [
+          {},
+          {
+            "examples": 3,
+            "from_time": "2024-08-01T00:00:00",
+            "to_time": "2024-08-29T23:59:59"
+          },
+          {
+            "area": {
+              "lat_max": 34.3,
+              "lat_min": 33.3,
+              "lon_max": -117.6,
+              "lon_min": -118.6
+            }
+          }
+        ]
+      },
+      "ScanResponse": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "rules_version": {
+            "type": "string",
+            "title": "Rules Version"
+          },
+          "readings_checked": {
+            "type": "integer",
+            "title": "Readings Checked"
+          },
+          "rule_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Rule Counts",
+            "description": "How many readings each rule or gap applies to (counted inside MySQL)",
+            "examples": [
+              {
+                "G1": 21817,
+                "R1": 8674,
+                "R2": 6621,
+                "R3": 19566,
+                "R4": 15440
+              }
+            ]
+          },
+          "outcome_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Outcome Counts",
+            "examples": [
+              {
+                "ACTION_REQUIRED": 27245,
+                "NO_ACTION": 296,
+                "REVIEW": 4524
+              }
+            ]
+          },
+          "examples": {
+            "items": {
+              "$ref": "#/components/schemas/ScanExample"
+            },
+            "type": "array",
+            "title": "Examples",
+            "description": "The newest readings that need action, evaluated in full"
+          },
+          "audit_logged": {
+            "type": "boolean",
+            "title": "Audit Logged"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "rules_version",
+          "readings_checked",
+          "rule_counts",
+          "outcome_counts",
+          "examples",
+          "audit_logged"
+        ],
+        "title": "ScanResponse"
+      },
+      "TokenResponse": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "title": "Access Token",
+            "description": "Send it as:  Authorization: Bearer <access_token>"
+          },
+          "token_type": {
+            "type": "string",
+            "const": "bearer",
+            "title": "Token Type",
+            "default": "bearer"
+          },
+          "expires_in": {
+            "type": "integer",
+            "title": "Expires In",
+            "description": "Seconds until the token expires",
+            "examples": [
+              1800
+            ]
+          },
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "examples": [
+              "dispatcher"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "access_token",
+          "expires_in",
+          "role"
+        ],
+        "title": "TokenResponse"
+      },
+      "Problem": {
+        "description": "The body of every error response (RFC 9457 problem details).",
+        "properties": {
+          "type": {
+            "examples": [
+              "https://fde-pb-sol.local/problems/not-found"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "title": {
+            "examples": [
+              "Reading not found"
+            ],
+            "title": "Title",
+            "type": "string"
+          },
+          "status": {
+            "examples": [
+              404
+            ],
+            "title": "Status",
+            "type": "integer"
+          },
+          "detail": {
+            "examples": [
+              "There is no reading with ID 99999999."
+            ],
+            "title": "Detail",
+            "type": "string"
+          },
+          "instance": {
+            "examples": [
+              "/v1/readings/99999999"
+            ],
+            "title": "Instance",
+            "type": "string"
+          },
+          "request_id": {
+            "examples": [
+              "3f0c9d4e8b6a4c1e9a7d2b5c6e8f0a1b"
+            ],
+            "title": "Request Id",
+            "type": "string"
+          },
+          "errors": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only for 422: one entry per invalid input",
+            "title": "Errors"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "request_id"
+        ],
+        "title": "Problem",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "Login (JWT)": {
+        "type": "oauth2",
+        "description": "People: log in with user name and password (dispatcher, supervisor or admin).",
+        "flows": {
+          "password": {
+            "scopes": {},
+            "tokenUrl": "/v1/auth/token"
+          }
+        }
+      },
+      "API key": {
+        "type": "apiKey",
+        "description": "Machine clients: the RULE_API_KEY value from .env.",
+        "in": "header",
+        "name": "X-API-Key"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Health",
+      "description": "Is the service up and ready?"
+    },
+    {
+      "name": "Login",
+      "description": "Get a JWT; see who you are."
+    },
+    {
+      "name": "Rules",
+      "description": "The SOP rules the engine applies."
+    },
+    {
+      "name": "Readings and decisions",
+      "description": "Readings from the legacy data and SOP decisions."
+    },
+    {
+      "name": "Bulk checks",
+      "description": "Rule counts over many readings."
+    }
+  ]
+}

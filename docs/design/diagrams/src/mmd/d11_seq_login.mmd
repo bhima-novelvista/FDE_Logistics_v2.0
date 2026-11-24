@@ -1,0 +1,21 @@
+sequenceDiagram
+    autonumber
+    actor A as Analyst (browser)
+    participant APP as app.py (Streamlit)
+    participant ENV as .env
+    participant DB as MySQL (legacy_fleet)
+    APP->>ENV: Read host, port, database, default user ID
+    A->>APP: User ID + password (typed)
+    APP->>DB: connect() + SELECT 1 as bi_analyst
+    alt password accepted
+        DB-->>APP: OK
+        APP-->>A: Sidebar + Fleet Overview
+        A->>APP: Choose a report and filters
+        APP->>DB: run_query(): SELECT with named parameters
+        DB-->>APP: Rows with cryptic column names
+        APP-->>A: Labels, KPIs, charts, map, table
+        APP-->>A: Back-end panel: SQL, rows, ms
+    else wrong password or server down
+        DB-->>APP: ERROR 1045 / 2003
+        APP-->>A: Login failed + hint
+    end

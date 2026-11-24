@@ -1,0 +1,4 @@
+# For running the tests and the example client on your computer (not needed in Docker).
+-r requirements.txt
+pytest==9.2.0
+httpx2==2.16.2

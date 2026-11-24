@@ -1,0 +1,16 @@
+# Secrets: never commit the real settings file or its backups
+.env
+.env.*
+!.env.example
+
+# macOS
+.DS_Store
+
+# Python (later steps)
+venv*/
+__pycache__/
+*.pyc
+
+# Generated files (later steps)
+data/cache/
+venv_legacy/
